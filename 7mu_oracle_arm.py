@@ -13,6 +13,9 @@ TG_BOT_TOKEN = ''  # 通过 @BotFather 申请获得，示例：1077xxx4424:AAFjv
 TG_USER_ID = ''  # 用户、群组或频道 ID，示例：129xxx206
 TG_API_HOST = 'api.telegram.org'  # 自建 API 反代地址，供网络环境无法访问时使用，网络正常则保持默认
 
+# instance config
+INSTANCE_PWD = ''
+
 
 def telegram(desp):
     data = (('chat_id', TG_USER_ID), ('text', '🐢 甲骨文ARM抢注脚本为您播报 🐢 \n\n' + desp))
@@ -201,16 +204,20 @@ class InsCreate:
     desp = ""
 
     def __init__(self, user: OciUser, filepath) -> None:
+        self.count_404 = 0
         self._user = user
         self._client = ComputeClient(config=dict(user))
         self.tf = FileParser(filepath)
 
-    def gen_pwd(self):
-        passwd = ''.join(
-            random.sample(
-                'ZYXWVUTSRQPONMLKJIHGFEDCBAzyxwvutsrqponmlkjihgfedcba#@1234567890',
-                13))
-        print("创建ssh登陆密码:{}\n".format(passwd))
+    def set_pwd(self):
+        if INSTANCE_PWD == '':
+            passwd = ''.join(
+                random.sample(
+                    'ZYXWVUTSRQPONMLKJIHGFEDCBAzyxwvutsrqponmlkjihgfedcba#@1234567890',
+                    13))
+        else:
+            passwd = INSTANCE_PWD
+        print("使用ssh登陆密码:{}\n".format(passwd))
         self._pwd = passwd
         sh = '#!/bin/bash \n    echo root:' + passwd + " | sudo chpasswd root\n    sudo sed -i 's/^.*PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config;\n    sudo sed -i 's/^.*PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config;\n    sudo reboot"
         sh64 = base64.b64encode(sh.encode('utf-8'))
@@ -220,36 +227,56 @@ class InsCreate:
     def create(self):
         # print("与运行创建活动")
         # 开启一个tg的原始推送
-        text = "脚本已启动:\n正在极速抢注以下配置小🐔\n\n区域: {}\n实例: {}\nCPU: {}C\n内存: {}G\n硬盘: {}G\n\n博客: https://blog.iyume.top".format(
+        text = "脚本已启动:\n正在极速抢注以下配置小🐔\n\n区域: {}\n实例: {}\nCPU: {}C\n内存: {}G\n硬盘: {}G\n".format(
             self.tf.availability_domain, self.tf.display_name, self.tf.ocpus,
             self.tf.memory_in_gbs, self.tf.boot_volume_size_in_gbs)
         telegram(text)
-        self.gen_pwd()
+        self.set_pwd()
         while True:
             try:
                 ins = self.lunch_instance()  # 应该返回具体的成功的数据
-            except oci.exceptions.ServiceError as e:
+
+            except oci.exceptions.ServiceError as e:  # 处理API内部错误
+
                 if e.status == 429 and e.code == 'TooManyRequests' and e.message == 'Too many requests for the user':
                     # 被限速了，改一下时间
                     print("请求太快了，正在自动调整请求时间")
+                    self.count_404 = 0
                     if self.sleep_time < 60:
                         self.sleep_time += 10
-                elif not (e.status == 500 and e.code == 'InternalError'
-                          and e.message == 'Out of host capacity.'):
-                    if "Service limit" in e.message and e.status==400:
 
-                        # 可能是别的错误，也有可能是 达到上限了，要去查看一下是否开通成功，也有可能错误了
-                        self.logp("❌ 如果看到这条推送，说明刷到机器，但是开通失败了，请后台检查你的cpu，内存，硬盘占用情况，并释放对应的资源 返回值:{},\n 脚本停止".format(e))
-                    else:
-                        self.logp("❌ 发生错误，脚本停止！相关问题:{}".format(e))
-                    telegram(self.desp)
-                    raise e
-                else:
+                elif e.status == 500 and e.code == 'InternalError' and e.message == 'Out of host capacity.':
                     # 没有被限速，恢复减少的时间
                     print("目前没有请求限速，快马加刷中")
+                    self.count_404 = 0
                     if self.sleep_time > 20:
                         self.sleep_time -= 10
-                print("本次返回信息:",e)
+                    print("本次返回信息:", e)
+                    time.sleep(self.sleep_time)
+
+                elif e.status == 404 and e.code == "NotAuthorizedOrNotFound":
+                    self.count_404 += 1
+                    self.logp("❌ 发生404错误，相关问题:{}".format(e))
+                    time.sleep(self.sleep_time * 2)
+                    if self.count_404 >= 5:
+                        self.logp("发生404次数过多，请检查账户是否被风控，或配置出错")
+                        telegram(self.desp)
+                        raise e
+
+                elif e.status == 400 and "Service limit" in e.message:
+                    # 可能是别的错误，也有可能是 达到上限了，要去查看一下是否开通成功，也有可能错误了
+                    self.count_404 = 0
+                    self.logp(
+                        "❌ 如果看到这条推送，说明刷到机器，但是开通失败了，请后台检查你的cpu，内存，硬盘占用情况，并释放对应的资源 返回值:{},\n 脚本停止".format(
+                            e))
+                else:
+                    self.count_404 = 0
+                    self.logp("❌ 发生API内部错误！相关问题:{}".format(e))
+                    telegram(self.desp)
+                    raise e
+            except oci.exceptions.RequestException as e:
+                print("请求错误，重试中\n", e)
+                self.logp("❌ 请求错误，开始等待，相关问题:{}".format(e))
                 time.sleep(self.sleep_time)
             else:
                 self.logp(
@@ -264,7 +291,6 @@ class InsCreate:
                 self.ins_id = ins.id
                 self.logp("SSH密码: {} \n".format(self._pwd))
                 self.check_public_ip()
-
                 telegram(self.desp)
                 break
             finally:
@@ -274,7 +300,7 @@ class InsCreate:
     def check_public_ip(self):
 
         network_client = VirtualNetworkClient(config=dict(self._user))
-        count=100
+        count = 100
         while count:
             attachments = self._client.list_vnic_attachments(
                 compartment_id=self._user.compartment_id(),
@@ -286,12 +312,11 @@ class InsCreate:
                 public_ip = network_client.get_vnic(vnic_id).data.public_ip
                 self.logp("公网ip为:{}\n🐢 脚本停止，感谢使用 😄 \n".format(public_ip))
                 self.public_ip = public_ip
-                self.logp("博客: https://blog.iyume.top")
-                return 
+                return
             time.sleep(5)
-            count-=1
+            count -= 1
         self.logp("开机失败，机器被甲骨文给关掉了😠，脚本停止，请重新运行\n")
-        
+
     def lunch_instance(self):
         return self._client.launch_instance(
             oci.core.models.LaunchInstanceDetails(
