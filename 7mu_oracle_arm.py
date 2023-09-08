@@ -18,10 +18,20 @@ INSTANCE_PWD = ''
 
 
 def telegram(desp):
+    global tg_push_error_count
+    response = None
     data = (('chat_id', TG_USER_ID), ('text', '🐢 甲骨文ARM抢注脚本为您播报 🐢 \n\n' + desp))
-    response = requests.post('https://' + TG_API_HOST + '/bot' + TG_BOT_TOKEN +
-                             '/sendMessage',
-                             data=data)
+    try:
+        response = requests.post('https://' + TG_API_HOST + '/bot' + TG_BOT_TOKEN +
+                                 '/sendMessage',
+                                 data=data)
+    except requests.exceptions.RequestException as e:
+        tg_push_error_count += 1
+        print("Telegram 因网络错误，推送失败。发生次数: {}", tg_push_error_count)
+        print("错误信息: {}", e)
+        if tg_push_error_count == 5:
+            print("TG推送多次出错, 脚本自动退出。")
+            raise e
     if response.status_code != 200:
         print('Telegram Bot 推送失败')
     else:
@@ -126,7 +136,7 @@ class FileParser:
 
     @property
     def ssh_authorized_keys(self):
-        self._sshkey
+        return self._sshkey
 
     @ssh_authorized_keys.setter
     def ssh_authorized_keys(self, key):
@@ -274,7 +284,7 @@ class InsCreate:
                     self.logp("❌ 发生API内部错误！相关问题:{}".format(e))
                     telegram(self.desp)
                     raise e
-            except (oci.exceptions.RequestException, oci.exceptions.ConnectTimeout) as e:
+            except oci.exceptions.RequestException as e:
                 print("网络错误，重试中\n", e)
                 self.logp("❌ 网络错误，开始等待，相关问题:{}".format(e))
                 time.sleep(self.sleep_time * 2)
@@ -347,5 +357,6 @@ class InsCreate:
 if __name__ == "__main__":
     user = OciUser()
     path = sys.argv[1]
+    tg_push_error_count = 0
     ins = InsCreate(user, path)
     ins.create()
