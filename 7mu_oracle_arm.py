@@ -274,10 +274,10 @@ class InsCreate:
                     self.logp("❌ 发生API内部错误！相关问题:{}".format(e))
                     telegram(self.desp)
                     raise e
-            except oci.exceptions.RequestException as e:
-                print("请求错误，重试中\n", e)
-                self.logp("❌ 请求错误，开始等待，相关问题:{}".format(e))
-                time.sleep(self.sleep_time)
+            except (oci.exceptions.RequestException, oci.exceptions.ConnectTimeout) as e:
+                print("网络错误，重试中\n", e)
+                self.logp("❌ 网络错误，开始等待，相关问题:{}".format(e))
+                time.sleep(self.sleep_time * 2)
             else:
                 self.logp(
                     "🎉 经过 {} 尝试后\n区域编号: {}\n实例名称: {}\nCPU核数: {}C\n内存大小: {}G\n硬盘容量: {}G\n🐔 已创建成功 🎉\n".format(
