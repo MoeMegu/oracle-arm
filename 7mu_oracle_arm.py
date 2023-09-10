@@ -284,8 +284,10 @@ class InsCreate:
                     self.logp("❌ 发生API内部错误！相关问题:{}".format(e))
                     telegram(self.desp)
                     raise e
+            except oci.exceptions.ConnectTimeout as e:
+                self.logp("❌ 请求超时，重试中，相关问题:{}".format(e))
+                time.sleep(self.sleep_time)
             except oci.exceptions.RequestException as e:
-                print("网络错误，重试中\n", e)
                 self.logp("❌ 网络错误，开始等待，相关问题:{}".format(e))
                 time.sleep(self.sleep_time * 2)
             else:
